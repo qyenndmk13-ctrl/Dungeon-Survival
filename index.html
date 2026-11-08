@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>DUNGEON SURVIVAL PRO MAX</title>
+<style>
+*{box-sizing:border-box;touch-action:none}
+body{margin:0;background:#090d18;color:white;font-family:monospace;overflow:hidden;user-select:none}
+#game{width:100vw;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#top,#hud{width:min(100vw,960px);padding:7px;display:flex;justify-content:space-between;align-items:center;font-size:12px}
+#top b{color:#ffd45e}
+canvas{width:100%;max-width:960px;aspect-ratio:16/9;background:#151b26;image-rendering:pixelated;border-top:3px solid #48516c;border-bottom:3px solid #48516c}
+.bar{height:10px;background:#333;width:100px;border:1px solid #777;display:inline-block}
+.fill{height:100%;width:100%;background:#e94355}
+#controls{width:min(100vw,960px);display:flex;justify-content:space-between;align-items:center;padding:8px 14px;flex:1;max-height:190px}
+#movement{display:grid;grid-template-columns:repeat(3,53px);grid-template-rows:repeat(3,43px);gap:3px}
+.btn{border:2px solid #7784a3;background:linear-gradient(#394760,#202b40);color:white;border-radius:12px;font-size:21px;font-weight:bold;display:flex;align-items:center;justify-content:center;box-shadow:0 4px #101522}
+.btn:active,.btn.active{background:#a36c36;transform:translateY(3px);box-shadow:none}
+#skills{display:grid;grid-template-columns:repeat(2,65px);gap:9px}
+.skill{height:60px;border-radius:13px;border:2px solid #7784a3;background:linear-gradient(#394760,#182236);color:white;font-size:10px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px}
+.skill strong{font-size:22px}
+.skill:active{background:#875d2d}
+#overlay{position:fixed;inset:0;background:#050914ef;display:flex;justify-content:center;align-items:center;z-index:5;text-align:center;padding:20px}
+.panel{width:min(430px,95vw);background:#172238;border:3px solid #697c9d;border-radius:15px;padding:20px;box-shadow:0 0 35px #243e70}
+.panel h1{color:#ffd45e;font-size:25px}
+.panel button{background:#b87b35;color:white;border:2px solid #ffda87;padding:12px 25px;font-weight:bold;border-radius:8px;font-size:16px;margin:6px}
+.hidden{display:none!important}
+#message{position:absolute;top:35%;left:0;width:100%;text-align:center;font-size:22px;color:#ffe68a;text-shadow:2px 2px black;pointer-events:none}
+@media(min-width:700px){#controls{max-height:155px}}
+</style>
+</head>
+<body>
+
+<div id="game">
+<div id="top">
+<b>⚔ DUNGEON SURVIVAL PRO</b>
+<span id="mapName">FOREST DUNGEON</span>
+<span id="stage">LEVEL 1</span>
+</div>
+
+<div id="hud">
+<span>HP <span id="hpText">100/100</span></span>
+<div class="bar"><div id="hpBar" class="fill"></div></div>
+<span>XP <span id="xpText">0</span></span>
+<span>💰 <span id="coins">0</span></span>
+<span>LV <span id="playerLevel">1</span></span>
+</div>
+
+<canvas id="canvas" width="960" height="540"></canvas>
+<div id="message"></div>
+
+<div id="controls">
+<div id="movement">
+<div></div>
+<button class="btn" data-key="up">▲</button>
+<div></div>
+<button class="btn" data-key="left">◀</button>
+<div></div>
+<button class="btn" data-key="right">▶</button>
+<div></div>
+<button class="btn" data-key="down">▼</button>
+<div></div>
+</div>
+
+<div id="skills">
+<button class="skill" id="dash"><strong>💨</strong>DASH<small id="dashCD">READY</small></button>
+<button class="skill" id="nova"><strong>🔥</strong>FIRE NOVA<small id="novaCD">READY</small></button>
+<button class="skill" id="heal"><strong>💚</strong>HEAL<small id="healCD">READY</small></button>
+<button class="skill" id="bomb"><strong>💥</strong>BOMB<small id="bombCD">READY</small></button>
+</div>
+</div>
+</div>
+
+<div id="overlay">
+<div class="panel" id="menu">
+<h1>⚔ DUNGEON SURVIVAL</h1>
+<p>PRO MAX EDITION</p>
+<p>Jelajahi dungeon, kumpulkan kekuatan, dan kalahkan para bos!</p>
+<p>🏹 Auto Aim | 🔥 Skills | 🐉 Bosses</p>
+<button onclick="startGame()">START GAME</button>
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const W=960,H=540,TILE=40,COLS=24,ROWS=14;
+
+let running=false,keys={};
+let player,enemies=[],arrows=[],particles=[],coins=[];
+let level=1,score=0,shootTimer=0;
+let cameraShake=0,messageTimer=0;
+let mapTiles=[];
+
+const maps=[
+{name:"🌲 FOREST DUNGEON",floor:"#253c31",wall:"#17291f",detail:"#52794a"},
+{name:"🪨 CRYSTAL CAVE",floor:"#263747",wall:"#131d31",detail:"#53b7c5"},
+{name:"🔥 LAVA HELL",floor:"#49251e",wall:"#24151a",detail:"#f16b30"},
+{name:"💀 DARK CASTLE",floor:"#343044",wall:"#191622",detail:"#9371bb"},
+{name:"❄ FROZEN RUINS",floor:"#33465a",wall:"#1b293b",detail:"#8ed9ef"}
+];
+
+function rand(a,b){return Math.random()*(b-a)+a}
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+function makeMap(){
+mapTiles=[];
+for(let y=0;y<ROWS;y++){
+let row=[];
+for(let x=0;x<COLS;x++){
+row.push(x===0||y===0||x===COLS-1||y===ROWS-1?1:0);
+}
+mapTiles.push(row);
+}
+for(let i=0;i<24;i++){
+let x=Math.floor(rand(2,COLS-2));
+let y=Math.floor(rand(2,ROWS-2));
+if(Math.hypot(x-12,y-7)>3)mapTiles[y][x]=1;
+}
+}
+
+function blocked(x,y){
+let tx=Math.floor(x/TILE),ty=Math.floor(y/TILE);
+return !mapTiles[ty]||mapTiles[ty][tx]!==0;
+}
+
+function freePosition(){
+let x,y,tries=0;
+do{
+x=rand(70,W-70);
+y=rand(70,H-70);
+tries++;
+}while((blocked(x,y)||Math.hypot(x-player.x,y-player.y)<150)&&tries<100);
+return{x,y};
+}
+
+function startGame(){
+document.getElementById("overlay").classList.add("hidden");
+player={
+x:480,y:270,r:14,speed:190,
+hp:100,maxHp:100,damage:20,
+level:1,xp:0,nextXP:50,
+attack:1,coins:0,invincible:0,
+dashCD:0,novaCD:0,healCD:0,bombCD:0
+};
+enemies=[];arrows=[];particles=[];coins=[];
+level=1;score=0;shootTimer=0;
+makeMap();spawnWave();
+running=true;
+last=performance.now();
+requestAnimationFrame(loop);
+}
+
+function spawnEnemy(type){
+let p=freePosition();
+let e={
+x:p.x,y:p.y,r:13,type,
+hp:40+level*12,maxHp:40+level*12,
+speed:rand(35,65)+level*2,
+damage:8+level*2,color:"#76d65d",attackCD:0
+};
+if(type==="bat"){
+e.color="#bd83f7";e.r=11;e.speed+=35;e.hp*=.65;
+}
+if(type==="orc"){
+e.color="#db8a43";e.r=18;e.speed-=10;e.hp*=2;e.damage*=1.5;
+}
+if(type==="knight"){
+e.color="#91a7bd";e.r=16;e.speed-=20;e.hp*=2.5;
+}
+enemies.push(e);
+}
+
+function spawnBoss(){
+let p=freePosition();
+let names=["DRAGON","DEMON KING","SHADOW TITAN","FIRE GOLEM"];
+let name=names[Math.floor((level/5-1)%names.length)];
+enemies.push({
+x:p.x,y:p.y,r:38,type:"boss",name,
+hp:1000+level*180,maxHp:1000+level*180,
+speed:48+level,damage:22+level*3,
+color:"#e34c52",attackCD:1
+});
+showMessage("⚠ BOSS APPROACHING!");
+}
+
+function spawnWave(){
+makeMap();
+enemies=[];arrows=[];particles=[];coins=[];
+if(level%5===0)spawnBoss();
+else{
+for(let i=0;i<5+level*2;i++){
+let types=["slime","bat","orc","knight"];
+spawnEnemy(types[Math.floor(rand(0,Math.min(2+level/3,4)))]);
+}
+}
+player.x=480;player.y=270;
+}
+
+function showMessage(t){
+document.getElementById("message").textContent=t;
+messageTimer=2;
+}
+
+function nearestEnemy(){
+let target=null,best=Infinity;
+for(let e of enemies){
+let d=distance(player,e);
+if(d<best){best=d;target=e}
+}
+return target;
+}
+
+function shoot(){
+let target=nearestEnemy();
+if(!target)return;
+let angle=Math.atan2(target.y-player.y,target.x-player.x);
+arrows.push({
+x:player.x,y:player.y,
+vx:Math.cos(angle)*470,vy:Math.sin(angle)*470,
+damage:player.damage,life:1.5
+});
+}
+
+function useDash(){
+if(!running||player.dashCD>0)return;
+let dx=(keys.right?1:0)-(keys.left?1:0);
+let dy=(keys.down?1:0)-(keys.up?1:0);
+if(!dx&&!dy)dx=1;
+let len=Math.hypot(dx,dy);
+player.x=clamp(player.x+dx/len*120,25,W-25);
+player.y=clamp(player.y+dy/len*120,25,H-25);
+player.dashCD=4;player.invincible=.5;
+for(let i=0;i<12;i++)particle(player.x,player.y,"#8eeaff");
+}
+
+function useNova(){
+if(!running||player.novaCD>0)return;
+player.novaCD=9;
+for(let e of enemies){
+if(distance(player,e)<170)e.hp-=player.damage*4;
+}
+for(let i=0;i<30;i++)particle(player.x,player.y,"#ff8c35");
+cameraShake=8;
+}
+
+function useHeal(){
+if(!running||player.healCD>0)return;
+player.healCD=18;
+player.hp=Math.min(player.maxHp,player.hp+35);
+for(let i=0;i<20;i++)particle(player.x,player.y,"#50ff95");
+}
+
+function useBomb(){
+if(!running||player.bombCD>0)return;
+player.bombCD=14;
+for(let e of enemies){
+if(distance(player,e)<230)e.hp-=player.damage*3;
+}
+for(let i=0;i<35;i++)particle(player.x,player.y,"#ffd85c");
+cameraShake=13;
+}
+
+function particle(x,y,color){
+particles.push({
+x,y,vx:rand(-120,120),vy:rand(-120,120),
+life:rand(.25,.7),color
+});
+}
+
+function movePlayer(dt){
+let dx=(keys.right?1:0)-(keys.left?1:0);
+let dy=(keys.down?1:0)-(keys.up?1:0);
+let len=Math.hypot(dx,dy);
+if(len){dx/=len;dy/=len}
+let nx=player.x+dx*player.speed*dt;
+let ny=player.y+dy*player.speed*dt;
+if(!blocked(nx,player.y))player.x=nx;
+if(!blocked(player.x,ny))player.y=ny;
+player.x=clamp(player.x,22,W-22);
+player.y=clamp(player.y,22,H-22);
+}
+
+function update(dt){
+if(!running)return;
+player.invincible=Math.max(0,player.invincible-dt);
+for(let k of ["dashCD","novaCD","healCD","bombCD"])
+player[k]=Math.max(0,player[k]-dt);
+
+movePlayer(dt);
+shootTimer-=dt;
+if(shootTimer<=0){shoot();shootTimer=Math.max(.18,.65/player.attack)}
+
+for(let a of arrows){
+a.x+=a.vx*dt;a.y+=a.vy*dt;a.life-=dt;
+for(let e of enemies){
+if(Math.hypot(a.x-e.x,a.y-e.y)<e.r+6){
+e.hp-=a.damage;a.life=0;
+particle(a.x,a.y,"#ffe38b");
+break;
+}
+}
+}
+arrows=arrows.filter(a=>a.life>0);
+
+for(let e of enemies){
+let dx=player.x-e.x,dy=player.y-e.y;
+let d=Math.hypot(dx,dy)||1;
+e.x+=dx/d*e.speed*dt;
+e.y+=dy/d*e.speed*dt;
+e.attackCD-=dt;
+if(d<e.r+player.r+5&&e.attackCD<=0){
+if(player.invincible<=0){
+player.hp-=e.damage;
+player.invincible=.45;
+cameraShake=5;
+}
+e.attackCD=.8;
+}
+e.x=clamp(e.x,20,W-20);
+e.y=clamp(e.y,20,H-20);
+}
+
+for(let e of enemies){
+if(e.hp<=0&&!e.rewarded){
+e.rewarded=true;
+score+=e.type==="boss"?500:10;
+coins.push({x:e.x,y:e.y,value:e.type==="boss"?50:3});
+player.xp+=e.type==="boss"?100:12;
+for(let i=0;i<10;i++)particle(e.x,e.y,e.color);
+}
+}
+enemies=enemies.filter(e=>e.hp>0);
+
+for(let c of coins){
+if(distance(c,player)<25){
+player.coins+=c.value;c.dead=true;
+}
+}
+coins=coins.filter(c=>!c.dead);
+
+for(let p of particles){
+p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;
+}
+particles=particles.filter(p=>p.life>0);
+
+if(player.xp>=player.nextXP){
+player.xp-=player.nextXP;
+player.level++;
+player.nextXP=Math.floor(player.nextXP*1.4);
+player.damage+=5;
+player.maxHp+=10;
+player.hp=player.maxHp;
+showMessage("⭐ LEVEL UP! DAMAGE +5");
+}
+
+if(enemies.length===0){
+level++;
+showMessage("DUNGEON CLEARED!");
+spawnWave();
+}
+if(player.hp<=0)gameOver();
+if(messageTimer>0)messageTimer-=dt;
+}
+
+function drawMap(){
+let m=maps[(level-1)%maps.length];
+ctx.fillStyle=m.floor;ctx.fillRect(0,0,W,H);
+for(let y=0;y<ROWS;y++){
+for(let x=0;x<COLS;x++){
+let px=x*TILE,py=y*TILE;
+if(mapTiles[y][x]){
+ctx.fillStyle=m.wall;ctx.fillRect(px,py,TILE,TILE);
+ctx.fillStyle=m.detail;ctx.fillRect(px+5,py+5,5,5);
+}else{
+ctx.fillStyle=m.floor;ctx.fillRect(px,py,TILE,TILE);
+if((x*13+y*7)%11===0){
+ctx.fillStyle=m.detail;ctx.globalAlpha=.35;
+ctx.fillRect(px+12,py+12,3,3);ctx.globalAlpha=1;
+}
+}
+}
+}
+}
+
+function pixelPerson(x,y,color,r){
+ctx.fillStyle="#10131d";
+ctx.fillRect(x-r,y-r,r*2,r*2);
+ctx.fillStyle=color;
+ctx.fillRect(x-r+3,y-r+3,r*2-6,r*2-6);
+ctx.fillStyle="#fff1c7";
+ctx.fillRect(x-r+5,y-r+5,4,4);
+ctx.fillRect(x+r-9,y-r+5,4,4);
+}
+
+function draw(){
+ctx.save();
+if(cameraShake>0){
+ctx.translate(rand(-cameraShake,cameraShake),rand(-cameraShake,cameraShake));
+cameraShake=Math.max(0,cameraShake-.5);
+}
+drawMap();
+
+for(let c of coins){
+ctx.fillStyle="#ffd94c";ctx.fillRect(c.x-5,c.y-5,10,10);
+}
+
+for(let e of enemies){
+ctx.fillStyle=e.color;
+ctx.fillRect(e.x-e.r,e.y-e.r,e.r*2,e.r*2);
+ctx.fillStyle="#fff";
+ctx.fillRect(e.x-7,e.y-5,4,4);
+ctx.fillRect(e.x+4,e.y-5,4,4);
+ctx.fillStyle="#21151c";
+ctx.fillRect(e.x-9,e.y-13,e.r*2,4);
+ctx.fillStyle="#ef4545";
+ctx.fillRect(e.x-9,e.y-13,18*Math.max(0,e.hp/e.maxHp),4);
+if(e.type==="boss"){
+ctx.fillStyle="#ffdb75";ctx.font="bold 17px monospace";
+ctx.textAlign="center";ctx.fillText(e.name,e.x,e.y-e.r-20);
+}
+}
+
+for(let a of arrows){
+ctx.save();ctx.translate(a.x,a.y);
+ctx.rotate(Math.atan2(a.vy,a.vx));
+ctx.fillStyle="#fce49b";ctx.fillRect(-12,-2,20,4);
+ctx.fillStyle="#fff";ctx.fillRect(5,-4,7,8);
+ctx.restore();
+}
+
+if(player.invincible<=0||Math.floor(performance.now()/100)%2===0){
+pixelPerson(player.x,player.y,"#3fa6e9",14);
+ctx.fillStyle="#c6d9ed";
+ctx.fillRect(player.x-12,player.y-18,24,5);
+ctx.fillStyle="#e7b56b";
+ctx.fillRect(player.x-5,player.y-24,10,8);
+}
+
+for(let p of particles){
+ctx.globalAlpha=Math.max(0,p.life*2);
+ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,5,5);
+}
+ctx.globalAlpha=1;
+ctx.restore();
+
+let boss=enemies.find(e=>e.type==="boss");
+if(boss){
+ctx.fillStyle="#18131c";ctx.fillRect(250,15,460,20);
+ctx.fillStyle="#e53c4d";
+ctx.fillRect(253,18,454*Math.max(0,boss.hp/boss.maxHp),14);
+ctx.fillStyle="white";ctx.font="12px monospace";
+ctx.textAlign="center";ctx.fillText("BOSS HP",480,49);
+}
+
+document.getElementById("hpText").textContent=
+Math.max(0,Math.ceil(player.hp))+"/"+player.maxHp;
+document.getElementById("hpBar").style.width=
+clamp(player.hp/player.maxHp*100,0,100)+"%";
+document.getElementById("xpText").textContent=
+player.xp+"/"+player.nextXP;
+document.getElementById("coins").textContent=player.coins;
+document.getElementById("playerLevel").textContent=player.level;
+document.getElementById("stage").textContent="LEVEL "+level;
+document.getElementById("mapName").textContent=maps[(level-1)%maps.length].name;
+
+for(let k of ["dash","nova","heal","bomb"]){
+document.getElementById(k+"CD").textContent=
+player[k+"CD"]>0?Math.ceil(player[k+"CD"])+"s":"READY";
+}
+}
+
+function gameOver(){
+running=false;
+document.getElementById("overlay").classList.remove("hidden");
+document.getElementById("menu").innerHTML=`
+<h1>💀 GAME OVER</h1>
+<h2>LEVEL ${level}</h2>
+<p>Score: ${score}</p>
+<p>Koin: ${player.coins}</p>
+<button onclick="startGame()">PLAY AGAIN</button>`;
+}
+
+let last=0;
+function loop(time){
+if(!running)return;
+let dt=Math.min((time-last)/1000,.035);
+last=time;
+update(dt);draw();
+if(messageTimer<=0)
+document.getElementById("message").textContent="";
+requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown",e=>{
+let k=e.key.toLowerCase();
+if(["arrowup","w"].includes(k))keys.up=true;
+if(["arrowdown","s"].includes(k))keys.down=true;
+if(["arrowleft","a"].includes(k))keys.left=true;
+if(["arrowright","d"].includes(k))keys.right=true;
+if(k===" "){e.preventDefault();useNova()}
+if(k==="shift")useDash();
+if(k==="q")useHeal();
+if(k==="e")useBomb();
+});
+
+window.addEventListener("keyup",e=>{
+let k=e.key.toLowerCase();
+if(["arrowup","w"].includes(k))keys.up=false;
+if(["arrowdown","s"].includes(k))keys.down=false;
+if(["arrowleft","a"].includes(k))keys.left=false;
+if(["arrowright","d"].includes(k))keys.right=false;
+});
+
+document.querySelectorAll("[data-key]").forEach(btn=>{
+let k=btn.dataset.key;
+btn.addEventListener("pointerdown",e=>{
+e.preventDefault();keys[k]=true;
+btn.classList.add("active");
+btn.setPointerCapture(e.pointerId);
+});
+function release(){
+keys[k]=false;btn.classList.remove("active");
+}
+btn.addEventListener("pointerup",release);
+btn.addEventListener("pointercancel",release);
+btn.addEventListener("lostpointercapture",release);
+});
+
+document.getElementById("dash").onclick=useDash;
+document.getElementById("nova").onclick=useNova;
+document.getElementById("heal").onclick=useHeal;
+document.getElementById("bomb").onclick=useBomb;
+</script>
+</body>
+</html>
